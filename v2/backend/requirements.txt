@@ -4,7 +4,7 @@ sqlalchemy==2.0.30
 pydantic==2.7.1
 python-multipart==0.0.9
 aiofiles==23.2.1
-pillow==10.3.0
+pillow>=10.3.0
 python-dateutil==2.9.0
 
 # Voice Agent
