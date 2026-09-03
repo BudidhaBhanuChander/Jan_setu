@@ -389,15 +389,20 @@ export default function CitizenDashboard() {
         e.preventDefault();
         setSubmittingMonsoon(true);
         try {
+            const emergencyBadge = "https://images.unsplash.com/photo-1547683905-f686c993aae5?auto=format&fit=crop&w=400&q=80";
+            const wardNum = parseInt(user?.ward_colony) || 21;
             const payload = {
                 raw_text: `[MONSOON EMERGENCY DRF] Hazard: ${monsoonForm.hazardType} | Location: ${monsoonForm.landmark} | Details: ${monsoonForm.description}`,
                 location_text: monsoonForm.landmark + ', Hyderabad (Emergency DRF Inundation)',
                 category: 'Roads & Infrastructure',
                 severity: 'CRITICAL',
-                citizen_name: monsoonForm.userName,
-                citizen_phone: monsoonForm.mobileNo,
+                citizen_name: monsoonForm.userName || user?.name || 'Citizen',
+                citizen_phone: monsoonForm.mobileNo || user?.phone || '',
                 citizen_id: user?.id,
-                channel: 'GHMC_MONSOON_DRF'
+                ward_id: wardNum,
+                channel: 'GHMC_MONSOON_DRF',
+                before_image_url: emergencyBadge,
+                image_path: emergencyBadge
             };
             const res = await api.post('/grievances/', payload);
             const created = res.data;
@@ -408,7 +413,7 @@ export default function CitizenDashboard() {
                 setMonsoonSuccessMessage('');
             }, 1800);
         } catch (err) {
-            alert('Emergency dispatch failed: ' + err.message);
+            alert('Emergency dispatch failed: ' + (err.response?.data?.detail || err.message));
         } finally {
             setSubmittingMonsoon(false);
         }
