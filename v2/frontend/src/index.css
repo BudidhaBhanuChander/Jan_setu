@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #1e3a8a;
+  --color-secondary: #10b981;
+  --color-background: #f3f4f6;
+  --color-surface: #ffffff;
+}
+
+@layer base {
+  body {
+    @apply antialiased font-sans bg-gray-50 text-gray-800;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}

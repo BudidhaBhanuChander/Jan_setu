@@ -1,0 +1,25 @@
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+sqlalchemy==2.0.30
+pydantic==2.7.1
+python-multipart==0.0.9
+aiofiles==23.2.1
+pillow==10.3.0
+python-dateutil==2.9.0
+
+# Voice Agent
+deepgram-sdk>=3.5.0
+gTTS>=2.5.1
+
+# LLM & Agent Framework
+langgraph>=0.4.0
+langchain-core>=1.0.0
+langchain-groq>=1.0.0
+openai>=1.0.0
+groq>=0.30.0
+requests>=2.32.0
+
+# V2 Enterprise Auth & DB
+passlib[bcrypt]
+python-jose[cryptography]
+chromadb
