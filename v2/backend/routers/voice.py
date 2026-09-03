@@ -1,7 +1,7 @@
 import json
 import uuid
 import asyncio
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from database import get_db
 from config import settings
 from agents.voice_agent import (
