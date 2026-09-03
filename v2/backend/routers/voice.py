@@ -22,12 +22,11 @@ async def websocket_endpoint(websocket: WebSocket):
     session_id = str(uuid.uuid4())
 
     if not voice_available():
+        print("[Voice WS] Notice: DEEPGRAM_API_KEY not configured. Audio STT disabled, text chat & AI triage active.")
         await websocket.send_json({
-            "type": "error",
-            "message": "Voice agent is disabled: no DEEPGRAM_API_KEY configured on the server.",
+            "type": "info",
+            "message": "Voice STT disabled (no DEEPGRAM_API_KEY), but text chat & AI triage are fully active.",
         })
-        await websocket.close()
-        return
 
     db = next(get_db())
     loop = asyncio.get_event_loop()
@@ -210,5 +209,30 @@ def voice_status():
         "available": available,
         "supported_languages": ["en", "hi", "te", "ur"],
     }
+
+
+@router.post("/chat")
+def voice_chat_rest(payload: dict, db = Depends(get_db)):
+    """REST fallback for chatbot text conversations when WebSockets are unavailable."""
+    text = payload.get("text", "").strip()
+    session_id = payload.get("session_id") or str(uuid.uuid4())
+    lang = payload.get("language", "en")
+    user_id = payload.get("user_id")
+    user_name = payload.get("user_name")
+    
+    if user_id or user_name:
+        sess = get_session(session_id)
+        if user_id: sess['user_id'] = user_id
+        if user_name: sess['user_name'] = user_name
+
+    response_text, agent_used, metadata = process_voice_intent(text, session_id, db, lang)
+    return {
+        "type": "response",
+        "text": response_text,
+        "agent_used": agent_used,
+        "metadata": metadata,
+        "session_id": session_id
+    }
+
 
 

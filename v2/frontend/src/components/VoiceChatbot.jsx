@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
+import api from '../api';
 import { Mic, Send, X, MessageSquare, Bot, User, Globe, Square, Volume2, VolumeX, CheckCircle2, ChevronRight, RefreshCw, FileText, Check, Copy } from 'lucide-react';
 
 const SAMPLE_GRIEVANCES = [
@@ -201,7 +202,7 @@ export default function VoiceChatbot({ embedded = false, onGrievanceRegistered }
         }
     };
 
-    const handleSendText = (textToSend) => {
+    const handleSendText = async (textToSend) => {
         const text = textToSend || inputText;
         if (!text || !text.trim()) return; 
 
@@ -215,37 +216,83 @@ export default function VoiceChatbot({ embedded = false, onGrievanceRegistered }
         setIsTyping(true);
         triggerProgressAnimation();
 
-        if (!ws || ws.readyState !== WebSocket.OPEN) { 
-            setTimeout(() => {
-                setIsTyping(false);
-                setProgressPercent(0);
-                const isLight = text.toLowerCase().includes('light');
-                const isRoad = text.toLowerCase().includes('road') || text.toLowerCase().includes('pothole');
-                const isGarbage = text.toLowerCase().includes('garbage') || text.toLowerCase().includes('dump');
-                const isDrainage = text.toLowerCase().includes('drain') || text.toLowerCase().includes('water');
-
-                setMessages(prev => [...prev, {
-                    sender: 'bot',
-                    text: `Thank you. Your GHMC complaint regarding "${text.substring(0, 45)}..." has been triaged. Our AI has assigned it to the local GHMC Ward Field Officer. Could you please confirm your exact colony landmark?`,
-                    detectedLang: language === 'te' ? 'Telugu' : language === 'hi' ? 'Hindi' : 'English',
-                    parsedInfo: {
-                        summary: text,
-                        department: isLight ? 'Electrical & Street Lighting' : isRoad ? 'Roads & Infrastructure Engineering' : isGarbage ? 'Sanitation & Solid Waste Management' : isDrainage ? 'Drainage & Water Works' : 'GHMC Public Works',
-                        category: isLight ? 'Non Glowing of Street Lights' : isRoad ? 'Repairs to Road (Pot holes)' : isGarbage ? 'Garbage Dump Clearance' : 'Civic Hazard Redressal'
-                    },
-                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
-                }]);
-            }, 1800);
-            return; 
+        // 1. Send via WebSocket if connected
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            try {
+                ws.send(JSON.stringify({ 
+                    type: 'text_input', 
+                    text: text.trim(), 
+                    language,
+                    user_id: user?.id,
+                    user_name: user?.name
+                }));
+            } catch (err) {
+                console.warn("WebSocket send error, fallback will take over", err);
+            }
         }
 
-        ws.send(JSON.stringify({ 
-            type: 'text_input', 
-            text: text.trim(), 
-            language,
-            user_id: user?.id,
-            user_name: user?.name
-        }));
+        // 2. Safety fallback timer: guarantees bot NEVER gets stuck in processing state
+        setTimeout(async () => {
+            setIsTyping(currentIsTyping => {
+                if (!currentIsTyping) return false;
+
+                (async () => {
+                    try {
+                        const res = await api.post('/voice/chat', {
+                            text: text.trim(),
+                            language,
+                            user_id: user?.id,
+                            user_name: user?.name
+                        });
+                        if (res.data && res.data.text) {
+                            setIsTyping(false);
+                            setProgressPercent(0);
+                            const meta = res.data.metadata || {};
+                            let parsedInfo = null;
+                            if (meta.tool_classify_grievance || meta.tool_register_grievance) {
+                                const toolData = meta.tool_classify_grievance || meta.tool_register_grievance;
+                                parsedInfo = {
+                                    summary: toolData.summary || res.data.text,
+                                    department: toolData.department || toolData.category || 'GHMC Municipal Engineering',
+                                    category: toolData.sub_category || toolData.category || 'Civic Infrastructure'
+                                };
+                            }
+                            setMessages(prev => [...prev, {
+                                sender: 'bot',
+                                text: res.data.text,
+                                detectedLang: language === 'te' ? 'Telugu' : language === 'hi' ? 'Hindi' : 'English',
+                                parsedInfo,
+                                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+                            }]);
+                            return;
+                        }
+                    } catch (e) {
+                        console.warn("REST chat failed, using local municipal triage", e);
+                    }
+
+                    setIsTyping(false);
+                    setProgressPercent(0);
+                    const isLight = text.toLowerCase().includes('light');
+                    const isRoad = text.toLowerCase().includes('road') || text.toLowerCase().includes('pothole');
+                    const isGarbage = text.toLowerCase().includes('garbage') || text.toLowerCase().includes('dump');
+                    const isDrainage = text.toLowerCase().includes('drain') || text.toLowerCase().includes('water');
+
+                    setMessages(prev => [...prev, {
+                        sender: 'bot',
+                        text: `Thank you. Your GHMC civic complaint regarding "${text.substring(0, 45)}..." has been triaged. Our system has assigned it to the local GHMC Ward Field Officer. Could you please confirm your exact colony landmark?`,
+                        detectedLang: language === 'te' ? 'Telugu' : language === 'hi' ? 'Hindi' : 'English',
+                        parsedInfo: {
+                            summary: text,
+                            department: isLight ? 'Electrical & Street Lighting' : isRoad ? 'Roads & Infrastructure Engineering' : isGarbage ? 'Sanitation & Solid Waste Management' : isDrainage ? 'Drainage & Water Works' : 'GHMC Public Works',
+                            category: isLight ? 'Non Glowing of Street Lights' : isRoad ? 'Repairs to Road (Pot holes)' : isGarbage ? 'Garbage Dump Clearance' : 'Civic Hazard Redressal'
+                        },
+                        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+                    }]);
+                })();
+
+                return false;
+            });
+        }, 3200);
     };
 
     const startRecording = async () => {
