@@ -13,6 +13,7 @@ export const ToastContext = React.createContext()
 export default function App() {
   const [activePage, setActivePage] = useState('citizen')
   const [toast, setToast] = useState(null)
+  const [navOpen, setNavOpen] = useState(false)
 
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type })
@@ -32,9 +33,10 @@ export default function App() {
   return (
     <ToastContext.Provider value={showToast}>
       <div className="app-layout">
-        <Sidebar activePage={activePage} setActivePage={setActivePage} />
+        <Sidebar activePage={activePage} setActivePage={setActivePage} isOpen={navOpen} onClose={() => setNavOpen(false)} />
+        {navOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
         <div className="main-content">
-          <Header title={title} subtitle={subtitle} activePage={activePage} setActivePage={setActivePage} />
+          <Header title={title} subtitle={subtitle} activePage={activePage} setActivePage={setActivePage} onMenuClick={() => setNavOpen(true)} />
           <div className="page-content">
             <PageComponent showToast={showToast} />
           </div>

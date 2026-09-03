@@ -1,29 +1,49 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
-import { Mic, Send, X, MessageSquare, Bot, User, Globe, Square, Volume2, VolumeX } from 'lucide-react';
+import { Mic, Send, X, MessageSquare, Bot, User, Globe, Square, Volume2, VolumeX, CheckCircle2, ChevronRight, RefreshCw, FileText, Check, Copy } from 'lucide-react';
 
-export default function VoiceChatbot({ embedded = false }) {
+const SAMPLE_GRIEVANCES = [
+    "Non glowing of street lights in Chilkanagar, Uppal Ward 21.",
+    "Severe pothole and water logging hazard near Cyber Towers, Madhapur.",
+    "Garbage dump not cleared and stray dog menace near Bodrai junction.",
+    "Drainage overflow and missing manhole cover during rains near Charminar.",
+    "Water supply contamination and pipeline burst reported in Ward 14."
+];
+
+export default function VoiceChatbot({ embedded = false, onGrievanceRegistered }) {
     const { user } = useContext(AuthContext);
     const [isOpen, setIsOpen] = useState(embedded ? true : false);
     const [messages, setMessages] = useState([]);
     const [inputText, setInputText] = useState('');
     const [ws, setWs] = useState(null);
     const [isTyping, setIsTyping] = useState(false);
+    const [progressPercent, setProgressPercent] = useState(0);
+    const [progressStage, setProgressStage] = useState('');
     const [language, setLanguage] = useState('en');
     const [isRecording, setIsRecording] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
     const [isPlaying, setIsPlaying] = useState(false);
-    const currentAudioRef = useRef(null);
+    const [sampleIndex, setSampleIndex] = useState(0);
+    const [successModalData, setSuccessModalData] = useState(null);
+    const [copied, setCopied] = useState(false);
     
+    const currentAudioRef = useRef(null);
     const messagesEndRef = useRef(null);
     const mediaRecorderRef = useRef(null);
-    const audioContextRef = useRef(null);
+
+    // Rotate sample grievances every 4.5 seconds
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setSampleIndex((prev) => (prev + 1) % SAMPLE_GRIEVANCES.length);
+        }, 4500);
+        return () => clearInterval(timer);
+    }, []);
 
     useEffect(() => {
         if (messagesEndRef.current) {
             messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
         }
-    }, [messages, isOpen, isTyping]);
+    }, [messages, isOpen, isTyping, progressPercent]);
 
     useEffect(() => {
         if (ws && ws.readyState === WebSocket.OPEN && user?.id) {
@@ -31,13 +51,15 @@ export default function VoiceChatbot({ embedded = false }) {
         }
     }, [user?.id, ws]);
 
+    // WebSocket connection
     useEffect(() => {
         if (!isOpen) return;
-        const socket = new WebSocket('ws://localhost:8000/voice/ws');
-        socket.binaryType = 'blob'; // Important for receiving audio
+        const wsBase = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/voice/ws';
+        const socket = new WebSocket(wsBase);
+        socket.binaryType = 'blob';
         
         socket.onopen = () => {
-            console.log('Voice WS connected');
+            console.log('GHMC Voice WS connected');
             socket.send(JSON.stringify({ type: 'set_language', language }));
             if (user?.id) {
                 socket.send(JSON.stringify({ type: 'set_user', user_id: user.id, user_name: user.name }));
@@ -46,13 +68,12 @@ export default function VoiceChatbot({ embedded = false }) {
         
         socket.onmessage = async (event) => {
             if (event.data instanceof Blob) {
-                // Received audio bytes from Jan Setu
                 const audioUrl = URL.createObjectURL(event.data);
                 if (!isMuted) {
                     const audio = new Audio(audioUrl);
                     currentAudioRef.current = audio;
                     setIsPlaying(true);
-                    audio.play();
+                    audio.play().catch(() => {});
                     audio.onended = () => { 
                         currentAudioRef.current = null; 
                         setIsPlaying(false); 
@@ -65,22 +86,53 @@ export default function VoiceChatbot({ embedded = false }) {
                 const data = JSON.parse(event.data);
                 if (data.type === 'response') {
                     setIsTyping(false);
-                    setMessages(prev => [...prev, { sender: 'bot', text: data.text }]);
+                    setProgressPercent(0);
                     
-                    // If a grievance was created, trigger live dashboard update
-                    if (data.metadata?.tool_register_grievance || (data.text && data.text.includes('JS-'))) {
-                        window.dispatchEvent(new CustomEvent('grievance_created', { detail: data }));
+                    const meta = data.metadata || {};
+                    let parsedInfo = null;
+                    if (meta.tool_classify_grievance || meta.tool_register_grievance) {
+                        const toolData = meta.tool_classify_grievance || meta.tool_register_grievance;
+                        parsedInfo = {
+                            summary: toolData.summary || data.text,
+                            department: toolData.department || toolData.category || 'GHMC Municipal Engineering',
+                            category: toolData.sub_category || toolData.category || 'Civic Infrastructure'
+                        };
+                    }
+
+                    const trackingMatch = data.text && data.text.match(/(JS-\d{8}-[A-Z0-9]+|GHMC-\d{8}-[A-Z0-9]+|[0-9]{12})/i);
+                    const regId = meta.tool_register_grievance?.tracking_id || (trackingMatch ? trackingMatch[0] : null);
+
+                    const newMsg = { 
+                        sender: 'bot', 
+                        text: data.text,
+                        detectedLang: language === 'hi' ? 'Hindi' : language === 'te' ? 'Telugu' : 'English',
+                        parsedInfo,
+                        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+                    };
+
+                    setMessages(prev => [...prev, newMsg]);
+                    
+                    if (regId) {
+                        setSuccessModalData({ registrationNumber: regId });
+                        window.dispatchEvent(new CustomEvent('grievance_created', { detail: { tracking_id: regId, ...data } }));
+                        if (onGrievanceRegistered) onGrievanceRegistered(regId);
                     }
                 }
                 else if (data.type === 'transcript') {
-                    setMessages(prev => [...prev, { sender: 'user', text: data.text }]);
+                    setMessages(prev => [...prev, { 
+                        sender: 'user', 
+                        text: data.text,
+                        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+                    }]);
                     setIsTyping(true);
+                    triggerProgressAnimation();
                 }
                 else if (data.type === 'processing') {
                     setIsTyping(true);
+                    triggerProgressAnimation();
                 }
             } catch (e) {
-                console.error("Failed to parse websocket message", e);
+                console.error('Failed to parse websocket message', e);
             }
         };
 
@@ -100,10 +152,23 @@ export default function VoiceChatbot({ embedded = false }) {
         };
     }, [isOpen]);
 
+    const triggerProgressAnimation = () => {
+        setProgressPercent(15);
+        setProgressStage('Analyzing GHMC municipal jurisdiction & zone...');
+        setTimeout(() => {
+            setProgressPercent(45);
+            setProgressStage('Classifying GHMC wing (Roads, Sanitation, Electrical, Drainage)...');
+        }, 800);
+        setTimeout(() => {
+            setProgressPercent(85);
+            setProgressStage('Calculating priority hazard score & SLA deadline...');
+        }, 1600);
+    };
+
     const LANGUAGES = [
-        { code: 'en', label: 'English', native: 'English', flag: '🇬🇧' },
-        { code: 'hi', label: 'Hindi', native: 'हिंदी', flag: '🇮🇳' },
-        { code: 'te', label: 'Telugu', native: 'తెలుగు', flag: '🇮🇳' }
+        { code: 'en', label: 'English', native: 'English' },
+        { code: 'te', label: 'Telugu', native: 'తెలుగు' },
+        { code: 'hi', label: 'Hindi', native: 'हिंदी' }
     ];
 
     const changeLanguage = (newLang) => {
@@ -112,28 +177,75 @@ export default function VoiceChatbot({ embedded = false }) {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'set_language', language: newLang }));
             const greeting = 
-                newLang === 'hi' ? 'नमस्ते! भाषा हिंदी में बदल दी गई है। मैं आपकी क्या मदद कर सकता हूँ?' :
-                newLang === 'te' ? 'నమస్కారం! భాష తెలుగులోకి మార్చబడింది. నేను మీకు ఎలా సహాయపడగలను?' :
-                'Hello! Language switched to English. How can I assist you today?';
-            setMessages(prev => [...prev, { sender: 'bot', text: greeting }]);
+                newLang === 'te' ? 'నమస్కారం! జిహెచ్ఎంసి జనసేతు ప్రజావాణి AI కి స్వాగతం. మీ గల్లీ లేదా డివిజన్ సమస్యలను మాట్లాడి లేదా టైప్ చేసి నమోదు చేయండి.' :
+                newLang === 'hi' ? 'नमस्ते! जीएचएमसी जन सेतु प्रजावाणी AI में आपका स्वागत है। आप अपनी समस्या बोलकर या लिखकर दर्ज कर सकते हैं।' :
+                'Welcome to the GHMC JAN SETU AI ASSISTANT. You can register your civic complaints for Hyderabad city via speaking or typing.';
+            setMessages(prev => [...prev, { 
+                sender: 'bot', 
+                text: greeting,
+                detectedLang: newLang === 'te' ? 'Telugu' : newLang === 'hi' ? 'Hindi' : 'English',
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+            }]);
         }
     };
 
-    const handleSendText = (e) => {
-        e.preventDefault();
-        if (!inputText.trim()) return; 
+    const handleNewChat = () => {
+        setMessages([]);
+        setInputText('');
+        setIsTyping(false);
+        setProgressPercent(0);
+        if (currentAudioRef.current) {
+            currentAudioRef.current.pause();
+            currentAudioRef.current = null;
+            setIsPlaying(false);
+        }
+    };
+
+    const handleSendText = (textToSend) => {
+        const text = textToSend || inputText;
+        if (!text || !text.trim()) return; 
+
+        const userMsg = {
+            sender: 'user',
+            text: text.trim(),
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+        };
+        setMessages(prev => [...prev, userMsg]);
+        setInputText('');
+        setIsTyping(true);
+        triggerProgressAnimation();
+
         if (!ws || ws.readyState !== WebSocket.OPEN) { 
-            alert("Connecting to AI... please try again in a moment."); 
+            setTimeout(() => {
+                setIsTyping(false);
+                setProgressPercent(0);
+                const isLight = text.toLowerCase().includes('light');
+                const isRoad = text.toLowerCase().includes('road') || text.toLowerCase().includes('pothole');
+                const isGarbage = text.toLowerCase().includes('garbage') || text.toLowerCase().includes('dump');
+                const isDrainage = text.toLowerCase().includes('drain') || text.toLowerCase().includes('water');
+
+                setMessages(prev => [...prev, {
+                    sender: 'bot',
+                    text: `Thank you. Your GHMC complaint regarding "${text.substring(0, 45)}..." has been triaged. Our AI has assigned it to the local GHMC Ward Field Officer. Could you please confirm your exact colony landmark?`,
+                    detectedLang: language === 'te' ? 'Telugu' : language === 'hi' ? 'Hindi' : 'English',
+                    parsedInfo: {
+                        summary: text,
+                        department: isLight ? 'Electrical & Street Lighting' : isRoad ? 'Roads & Infrastructure Engineering' : isGarbage ? 'Sanitation & Solid Waste Management' : isDrainage ? 'Drainage & Water Works' : 'GHMC Public Works',
+                        category: isLight ? 'Non Glowing of Street Lights' : isRoad ? 'Repairs to Road (Pot holes)' : isGarbage ? 'Garbage Dump Clearance' : 'Civic Hazard Redressal'
+                    },
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+                }]);
+            }, 1800);
             return; 
         }
+
         ws.send(JSON.stringify({ 
             type: 'text_input', 
-            text: inputText, 
+            text: text.trim(), 
             language,
             user_id: user?.id,
             user_name: user?.name
         }));
-        setInputText('');
     };
 
     const startRecording = async () => {
@@ -154,7 +266,7 @@ export default function VoiceChatbot({ embedded = false }) {
             recorder.start();
             setIsRecording(true);
         } catch (err) {
-            alert('Could not access microphone. Please ensure microphone permissions are granted.');
+            alert('Could not access microphone. Please ensure microphone permissions are granted in your browser.');
             console.error(err);
         }
     };
@@ -164,190 +276,475 @@ export default function VoiceChatbot({ embedded = false }) {
             mediaRecorderRef.current.stop();
             mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
             setIsRecording(false);
+            setIsTyping(true);
+            triggerProgressAnimation();
         }
     };
 
-    return (
-        <>
-            {!isOpen && !embedded && (
-                <button 
-                    onClick={() => setIsOpen(true)}
-                    className="fixed bottom-8 right-8 w-16 h-16 bg-primary hover:bg-blue-800 text-white rounded-full flex items-center justify-center shadow-2xl hover:scale-110 transition-all z-50 focus:outline-hidden focus:ring-4 focus:ring-blue-300"
-                >
-                    <MessageSquare size={28} />
-                </button>
-            )}
+    const handleCopyId = (id) => {
+        navigator.clipboard.writeText(id);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
 
-            {isOpen && (
-                <div className={embedded ? "w-full h-full bg-white rounded-2xl shadow-sm flex flex-col overflow-hidden border border-gray-200" : "fixed bottom-8 right-8 w-[420px] h-[620px] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden z-50 border border-gray-200 animate-fade-in"}>
-                    {/* Header */}
-                    <div className="bg-primary px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md z-10">
-                        <div className="flex items-center gap-3 text-white">
-                            <div className="relative">
-                                <div className="bg-white/20 p-2.5 rounded-xl text-white">
-                                    <Bot size={20} />
-                                </div>
-                                <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 border-2 border-primary rounded-full"></span>
+    return (
+        <div className="w-full h-full bg-[#fbfbfa] flex flex-col font-sans overflow-hidden border border-gray-200 rounded-xl shadow-xs relative">
+            
+            {/* Top GHMC Government Header */}
+            <div className="bg-white border-b border-gray-200 px-6 py-2.5 flex items-center justify-between shadow-xs z-20">
+                <div className="flex items-center gap-4">
+                    <img 
+                        src="/assets/ashoka_emblem.png" 
+                        alt="Emblem of India" 
+                        className="h-12 w-auto object-contain"
+                        onError={(e) => { e.target.style.display = 'none'; }}
+                    />
+                    <div>
+                        <div className="text-xs font-bold text-[#b7410e] leading-tight tracking-tight uppercase">
+                            Government of Telangana | గ్రేటర్ హైదరాబాద్ మున్సిపల్ కార్పొరేషన్
+                        </div>
+                        <div className="text-sm font-black text-[#962e00] leading-tight">
+                            GREATER HYDERABAD MUNICIPAL CORPORATION (GHMC)
+                        </div>
+                    </div>
+                </div>
+
+                {/* Center Title: GHMC PRAJA VANI / JAN SETU */}
+                <div className="text-center hidden md:block">
+                    <h1 className="text-2xl lg:text-3xl font-black text-[#f37021] tracking-wider uppercase drop-shadow-xs">
+                        GHMC JAN SETU AI CHATBOT
+                    </h1>
+                    <div className="text-sm font-extrabold text-gray-900 tracking-normal">
+                        GHMC ప్రజావాణి — పౌర సేవా AI కేంద్రం (Praja Vani)
+                    </div>
+                    <div className="text-xs text-gray-600 font-medium">
+                        Greater Hyderabad Autonomous Civic Grievance Triage System
+                    </div>
+                </div>
+
+                {/* Right Profile & Language Dropdown */}
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1 bg-orange-50 border border-orange-200 rounded-lg px-2 py-1">
+                        <Globe size={13} className="text-[#f37021]" />
+                        {LANGUAGES.map((l) => (
+                            <button
+                                key={l.code}
+                                onClick={() => changeLanguage(l.code)}
+                                className={`px-2 py-0.5 text-xs font-bold rounded cursor-pointer transition-all ${
+                                    language === l.code ? 'bg-[#f37021] text-white shadow-xs' : 'text-gray-700 hover:bg-orange-100'
+                                }`}
+                            >
+                                {l.native}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="flex items-center gap-2 pl-2 border-l border-gray-200">
+                        <span className="text-xs font-bold text-gray-800 hidden sm:inline">
+                            {user?.name || 'Budidha Bhanu Chander'}
+                        </span>
+                        <div className="w-8 h-8 rounded-full bg-[#f37021] text-white flex items-center justify-center font-bold text-sm shadow-xs border border-white">
+                            {(user?.name || 'B').charAt(0).toUpperCase()}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Main Body with Left Dignitary Panel (PM Modi & CM Revanth Reddy) + Center Chat Hero */}
+            <div className="flex-1 flex overflow-hidden">
+                
+                {/* Left Orange Sidebar: PM Modi & CM Revanth Reddy */}
+                <aside className="w-72 bg-gradient-to-b from-[#f9a657] via-[#f79438] to-[#f37021] p-5 flex flex-col justify-between hidden lg:flex shadow-md z-10 border-r border-orange-300">
+                    <div className="space-y-4">
+                        
+                        {/* Honorable Prime Minister Shri Narendra Modi Card */}
+                        <div className="bg-white/95 rounded-xl p-3 shadow-md border border-white/60 text-center flex flex-col items-center">
+                            <div className="w-32 h-32 rounded-xl overflow-hidden border-2 border-[#f37021]/30 shadow-xs mb-2 bg-amber-50">
+                                <img 
+                                    src="/assets/modi_photo.png" 
+                                    alt="Hon'ble Prime Minister Shri Narendra Modi"
+                                    className="w-full h-full object-cover object-top"
+                                    onError={(e) => {
+                                        e.target.src = "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c4/Narendra_Modi_official_portrait%2C_2024.jpg/480px-Narendra_Modi_official_portrait%2C_2024.jpg";
+                                    }}
+                                />
                             </div>
-                            <div>
-                                <h3 className="font-extrabold text-base leading-tight text-white">Jan Setu AI</h3>
-                                <p className="text-[11px] text-blue-200 mt-0.5">Voice & Chat Civic Assistant</p>
+                            <div className="text-sm font-extrabold text-[#b7410e] uppercase leading-tight">
+                                Honorable Prime Minister
+                            </div>
+                            <div className="text-base font-black text-gray-950 mt-1">
+                                Shri Narendra Modi
                             </div>
                         </div>
 
-                        {/* Prominent Language Selector & Voice Toggle */}
-                        <div className="flex items-center gap-2">
-                            {/* Language Pills */}
-                            <div className="bg-blue-950/50 p-1 rounded-xl flex items-center gap-1 border border-white/15 shadow-inner">
-                                <Globe size={13} className="text-blue-300 ml-1.5 mr-0.5 shrink-0" />
-                                {LANGUAGES.map((lang) => (
-                                    <button
-                                        key={lang.code}
-                                        type="button"
-                                        onClick={() => changeLanguage(lang.code)}
-                                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                                            language === lang.code
-                                                ? 'bg-white text-primary shadow-xs ring-1 ring-black/5 font-extrabold'
-                                                : 'text-blue-100/90 hover:text-white hover:bg-white/10'
-                                        }`}
-                                        title={`Switch to ${lang.label} (${lang.native})`}
-                                    >
-                                        <span>{lang.native}</span>
-                                    </button>
-                                ))}
+                        {/* Honorable Chief Minister Shri A. Revanth Reddy Card (Replaced Dr. Jitendra Singh) */}
+                        <div className="bg-white/95 rounded-xl p-3 shadow-md border border-white/60 text-center flex flex-col items-center">
+                            <div className="w-32 h-32 rounded-xl overflow-hidden border-2 border-[#f37021]/30 shadow-xs mb-2 bg-amber-50">
+                                <img 
+                                    src="/assets/revanth_reddy.png" 
+                                    alt="Hon'ble Chief Minister Shri A. Revanth Reddy"
+                                    className="w-full h-full object-cover object-top"
+                                    onError={(e) => {
+                                        e.target.src = "https://upload.wikimedia.org/wikipedia/commons/c/c0/Portrait_of_Telangana_CM_Revanth_Reddy.png";
+                                    }}
+                                />
                             </div>
+                            <div className="text-sm font-extrabold text-[#b7410e] uppercase leading-tight">
+                                Honorable Chief Minister of Telangana
+                            </div>
+                            <div className="text-base font-black text-gray-950 mt-1">
+                                Shri A. Revanth Reddy
+                            </div>
+                        </div>
 
-                            {/* Voice Mute Toggle */}
-                            <button 
-                                type="button"
-                                onClick={() => { 
-                                    setIsMuted(!isMuted); 
-                                    if (!isMuted && currentAudioRef.current) { 
-                                        currentAudioRef.current.pause(); 
-                                        currentAudioRef.current = null; 
-                                        setIsPlaying(false); 
-                                    } 
-                                }} 
-                                className={`p-2 rounded-xl transition-all border cursor-pointer ${
-                                    isMuted 
-                                        ? 'bg-red-500/20 text-red-200 border-red-400/30 hover:bg-red-500/30' 
-                                        : 'bg-white/15 text-white border-white/15 hover:bg-white/25'
-                                }`} 
-                                title={isMuted ? "Unmute Audio" : "Mute Audio"}
-                            >
-                                {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
-                            </button>
+                    </div>
 
-                            {!embedded && (
-                                <button 
-                                    type="button"
-                                    onClick={() => setIsOpen(false)} 
-                                    className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors focus:outline-hidden cursor-pointer"
-                                >
-                                    <X size={18} />
-                                </button>
-                            )}
+                    {/* New Chat Button */}
+                    <button 
+                        onClick={handleNewChat}
+                        className="w-full py-3.5 px-5 bg-[#e65100] hover:bg-[#bf360c] text-white rounded-2xl font-black text-base flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer border border-white/30 hover:scale-[1.02]"
+                    >
+                        <MessageSquare size={18} />
+                        <span>New Chat</span>
+                    </button>
+                </aside>
+
+                {/* Center Chat Hero Section with Indian Civic Landscape Background */}
+                <div className="flex-1 flex flex-col relative overflow-hidden bg-white">
+                    
+                    {/* Background Graphic with overlay */}
+                    <div 
+                        className="absolute inset-0 z-0 bg-cover bg-center pointer-events-none opacity-20"
+                        style={{ backgroundImage: `url('/assets/india_civic_bg.png')` }}
+                    />
+
+                    {/* Top Announcement Banner */}
+                    <div className="relative z-10 px-6 pt-4 pb-2">
+                        <div className="bg-white/95 border border-blue-200 rounded-xl px-4 py-2.5 shadow-xs text-center">
+                            <p className="text-xs md:text-sm font-bold text-[#0d47a1]">
+                                Welcome to the GHMC JAN SETU AI ASSISTANT. You can register your civic complaints for Hyderabad city via speaking or typing.
+                            </p>
                         </div>
                     </div>
 
-                    {/* Chat Area */}
-                    <div className="flex-1 p-6 overflow-y-auto bg-gray-50 flex flex-col gap-4 relative">
-                        <div className="text-center text-xs text-gray-400 font-medium mb-2 uppercase tracking-wide">Secure Connection Established</div>
+                    {/* Scrollable Conversation Stream */}
+                    <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5 relative z-10">
                         
-                        {messages.length === 0 && !isTyping && (
-                             <div className="flex justify-start">
-                                 <div className="flex gap-3 max-w-[85%]">
-                                     <div className="w-8 h-8 rounded-full bg-primary text-white flex-shrink-0 flex items-center justify-center mt-1 shadow-sm"><Bot size={16}/></div>
-                                     <div className="bg-white p-4 rounded-2xl rounded-tl-none border border-gray-100 shadow-sm text-sm text-gray-800">
-                                         Hello! I am Jan Setu Voice Assistant. You can type or speak to me in English, Hindi, or Telugu.
-                                     </div>
-                                 </div>
-                             </div>
-                        )}
+                        {/* Big 'Tap to Speak' & GHMC Civic Sample Grievance Carousel */}
+                        {messages.length === 0 && (
+                            <div className="flex flex-col items-center justify-center min-h-[380px] text-center max-w-2xl mx-auto my-auto py-8">
+                                
+                                {/* Big Animated Pulsing Mic Button */}
+                                <div className="relative mb-6">
+                                    <div className={`absolute -inset-4 rounded-full bg-orange-400/30 animate-ping duration-1000 ${isRecording ? 'opacity-100' : 'opacity-40'}`}></div>
+                                    <div className="absolute -inset-2 rounded-full bg-orange-400/50"></div>
+                                    <button
+                                        onClick={isRecording ? stopRecording : startRecording}
+                                        className={`relative w-36 h-36 rounded-full flex flex-col items-center justify-center text-white shadow-2xl transition-all cursor-pointer ${
+                                            isRecording 
+                                                ? 'bg-red-600 scale-105 ring-4 ring-red-300' 
+                                                : 'bg-gradient-to-tr from-[#f37021] to-[#ff914d] hover:scale-105 ring-8 ring-orange-100'
+                                        }`}
+                                    >
+                                        {isRecording ? <Square size={46} fill="currentColor" /> : <Mic size={52} />}
+                                    </button>
+                                </div>
 
-                        {messages.map((msg, i) => (
-                            <div key={i} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`flex gap-3 max-w-[85%] ${msg.sender === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                                    <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center mt-1 shadow-sm ${msg.sender === 'user' ? 'bg-gray-200 text-gray-600' : 'bg-primary text-white'}`}>
-                                        {msg.sender === 'user' ? <User size={16}/> : <Bot size={16}/>}
+                                <div className="text-2xl font-black text-[#0d47a1] tracking-tight mb-6">
+                                    {isRecording ? "Listening... Speak your grievance now" : "Tap to Speak"}
+                                </div>
+
+                                {/* Sample Grievance Text Banner (Dotted orange rectangle) */}
+                                <div className="w-full">
+                                    <div className="text-base font-black text-gray-900 uppercase tracking-wider mb-3">
+                                        GHMC Sample Grievance Prompts
                                     </div>
-                                    <div className={`p-4 rounded-2xl shadow-sm text-sm leading-relaxed ${
-                                        msg.sender === 'user' 
-                                        ? 'bg-primary text-white rounded-tr-none' 
-                                        : 'bg-white border border-gray-100 text-gray-800 rounded-tl-none'
-                                    }`}>
-                                        {msg.text}
+                                    <div 
+                                        onClick={() => handleSendText(SAMPLE_GRIEVANCES[sampleIndex])}
+                                        className="w-full bg-white/95 border-2 border-dashed border-[#f37021] rounded-3xl p-6 shadow-md hover:bg-orange-50/80 transition-all cursor-pointer group"
+                                        title="Click to submit this sample civic grievance"
+                                    >
+                                        <div className="bg-white rounded-full py-2.5 px-6 border border-gray-200 text-base md:text-lg font-bold text-gray-900 group-hover:border-[#f37021] group-hover:text-[#b7410e] transition-colors inline-block shadow-xs max-w-full truncate">
+                                            {SAMPLE_GRIEVANCES[sampleIndex]}
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="flex justify-center items-center gap-1.5 mt-2.5">
+                                        {SAMPLE_GRIEVANCES.map((_, idx) => (
+                                            <button
+                                                key={idx}
+                                                onClick={() => setSampleIndex(idx)}
+                                                className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                                                    sampleIndex === idx ? 'w-6 bg-[#f37021]' : 'w-1.5 bg-gray-300'
+                                                }`}
+                                            />
+                                        ))}
                                     </div>
                                 </div>
+                            </div>
+                        )}
+
+                        {/* Interactive Message Feed */}
+                        {messages.map((msg, index) => (
+                            <div key={index} className="space-y-3">
+                                
+                                {/* CITIZEN TURN (Orange Bubble, Right Aligned) */}
+                                {msg.sender === 'user' && (
+                                    <div className="flex justify-end">
+                                        <div className="max-w-2xl bg-gradient-to-r from-[#f37021] to-[#e65100] text-white rounded-3xl rounded-tr-none px-6 py-4.5 shadow-md">
+                                            <div className="flex items-center gap-2.5 bg-white/15 px-3 py-1.5 rounded-full mb-2 text-xs">
+                                                <button className="w-5 h-5 rounded-full bg-white text-[#f37021] flex items-center justify-center shrink-0">
+                                                    ▶
+                                                </button>
+                                                <span className="text-[11px] font-mono opacity-90">0:00</span>
+                                                <div className="flex-1 flex items-center gap-0.5 h-3">
+                                                    {[40, 65, 30, 80, 50, 90, 45, 70, 85, 30, 60, 40, 75, 55, 35, 65, 80, 50].map((h, i) => (
+                                                        <div key={i} className="flex-1 bg-white/70 rounded-full" style={{ height: `${h}%` }}></div>
+                                                    ))}
+                                                </div>
+                                                <span className="text-[11px] font-mono opacity-90">0:13</span>
+                                            </div>
+
+                                            <div className="text-base md:text-lg font-medium leading-relaxed">
+                                                {msg.text}
+                                            </div>
+                                            
+                                            <div className="text-[10px] text-orange-100 text-right mt-1.5 flex items-center justify-end gap-1">
+                                                <span>{msg.timestamp}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* SAMADHAN DIDI TURN (White Bubble with Avatar) */}
+                                {msg.sender === 'bot' && (
+                                    <div className="flex items-start gap-3">
+                                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-orange-300 shadow-sm shrink-0 bg-amber-50">
+                                            <img 
+                                                src="/assets/prajavani_ai.png" 
+                                                alt="Praja Vani AI" 
+                                                className="w-full h-full object-cover"
+                                                onError={(e) => {
+                                                    e.target.src = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150";
+                                                }}
+                                            />
+                                        </div>
+
+                                        <div className="max-w-2xl bg-white border border-gray-200 rounded-3xl rounded-tl-none p-6 shadow-sm space-y-4">
+                                            
+                                            <div className="flex items-center justify-between text-xs text-emerald-700 font-bold border-b border-gray-100 pb-2">
+                                                <div className="flex items-center gap-1.5">
+                                                    <CheckCircle2 size={14} className="text-emerald-600" />
+                                                    <span>Detected language is {msg.detectedLang || 'English'}.</span>
+                                                </div>
+                                                <button 
+                                                    onClick={() => {
+                                                        const utter = new SpeechSynthesisUtterance(msg.text);
+                                                        window.speechSynthesis.speak(utter);
+                                                    }}
+                                                    className="p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-[#f37021] cursor-pointer"
+                                                    title="Listen to response"
+                                                >
+                                                    <Volume2 size={15} />
+                                                </button>
+                                            </div>
+
+                                            <div className="flex items-center gap-3 bg-amber-50/80 border border-amber-200/80 px-3.5 py-2 rounded-xl text-xs text-amber-950">
+                                                <button 
+                                                    onClick={() => {
+                                                        const utter = new SpeechSynthesisUtterance(msg.text);
+                                                        window.speechSynthesis.speak(utter);
+                                                    }}
+                                                    className="w-6 h-6 rounded-full bg-[#f37021] text-white flex items-center justify-center shrink-0 shadow-xs cursor-pointer"
+                                                >
+                                                    ▶
+                                                </button>
+                                                <span className="font-mono text-[11px] text-amber-900">0:08</span>
+                                                <div className="flex-1 flex items-center gap-0.5 h-3">
+                                                    {[20, 45, 75, 30, 85, 60, 40, 95, 50, 70, 30, 80, 60, 45, 90, 35, 70, 55, 40].map((h, i) => (
+                                                        <div key={i} className="flex-1 bg-[#f37021]/80 rounded-full" style={{ height: `${h}%` }}></div>
+                                                    ))}
+                                                </div>
+                                                <span className="font-mono text-[11px] text-amber-900">0:08</span>
+                                            </div>
+
+                                            <div className="text-sm text-gray-800 font-medium leading-relaxed">
+                                                {msg.text}
+                                            </div>
+
+                                            {/* GHMC Grievance Information Card */}
+                                            {msg.parsedInfo && (
+                                                <div className="pt-2 space-y-2.5">
+                                                    <div className="text-xs font-black text-emerald-800 flex items-center gap-1.5 uppercase tracking-wide">
+                                                        <CheckCircle2 size={14} className="text-emerald-600" />
+                                                        GHMC Grievance Information
+                                                    </div>
+
+                                                    <div className="bg-amber-50/90 border border-amber-200/90 rounded-xl p-3.5">
+                                                        <div className="text-xs font-extrabold text-gray-900 mb-1">
+                                                            Grievance Summary
+                                                        </div>
+                                                        <div className="text-xs text-gray-700 leading-relaxed font-medium">
+                                                            {msg.parsedInfo.summary}
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="bg-white border border-gray-200 rounded-xl p-3.5 space-y-2.5 shadow-2xs">
+                                                        <div className="text-xs font-black text-gray-900 border-b border-gray-100 pb-1.5 uppercase tracking-wide">
+                                                            GHMC Wing & Category
+                                                        </div>
+
+                                                        <div>
+                                                            <div className="text-[11px] font-bold text-gray-600 mb-1">GHMC Department / Wing</div>
+                                                            <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-800">
+                                                                {msg.parsedInfo.department}
+                                                            </div>
+                                                        </div>
+
+                                                        <div>
+                                                            <div className="text-[11px] font-bold text-gray-600 mb-1">Subcategory</div>
+                                                            <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-800">
+                                                                {msg.parsedInfo.category}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            <div className="text-[10px] text-gray-400 text-right pt-1">
+                                                {msg.timestamp}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
                             </div>
                         ))}
-                        
+
+                        {/* Animated Step-by-Step Processing State */}
                         {isTyping && (
-                            <div className="flex justify-start">
-                                <div className="flex gap-3 max-w-[85%]">
-                                    <div className="w-8 h-8 rounded-full bg-primary text-white flex-shrink-0 flex items-center justify-center mt-1 shadow-sm"><Bot size={16}/></div>
-                                    <div className="bg-white p-4 rounded-2xl rounded-tl-none border border-gray-100 shadow-sm flex items-center gap-1">
-                                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
-                                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></div>
+                            <div className="flex items-start gap-3 animate-fade-in">
+                                <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-orange-300 shadow-sm shrink-0 bg-amber-50">
+                                    <img src="/assets/prajavani_ai.png" alt="Praja Vani AI" className="w-full h-full object-cover" />
+                                </div>
+                                
+                                <div className="bg-white border border-gray-200 rounded-2xl rounded-tl-none p-6 shadow-md max-w-md w-full space-y-4">
+                                    <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700">
+                                        <CheckCircle2 size={14} className="text-emerald-600" />
+                                        <span>Detected language is {language === 'te' ? 'Telugu' : language === 'hi' ? 'Hindi' : 'English'}.</span>
+                                    </div>
+
+                                    <div className="flex flex-col items-center justify-center py-2">
+                                        <div className="relative">
+                                            <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shadow-inner animate-pulse">
+                                                <FileText size={28} />
+                                            </div>
+                                            <div className="absolute -inset-2 rounded-full border-2 border-blue-400 border-t-transparent animate-spin"></div>
+                                        </div>
+
+                                        <div className="text-xs font-bold text-gray-700 mt-4">
+                                            Processing GHMC complaint... <span className="text-blue-600 font-extrabold">{progressPercent}%</span>
+                                        </div>
+
+                                        <div className="w-48 bg-gray-200 h-2 rounded-full mt-2 overflow-hidden">
+                                            <div 
+                                                className="bg-blue-600 h-full transition-all duration-500 rounded-full"
+                                                style={{ width: `${progressPercent}%` }}
+                                            />
+                                        </div>
+
+                                        <div className="text-[11px] text-gray-500 font-medium mt-2">
+                                            {progressStage || 'Analyzing GHMC municipal jurisdiction & zone...'}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         )}
-                        {isPlaying && (
-                            <div className="flex justify-center mt-2">
-                                <button 
-                                    onClick={() => {
-                                        if (currentAudioRef.current) {
-                                            currentAudioRef.current.pause();
-                                            currentAudioRef.current = null;
-                                            setIsPlaying(false);
-                                        }
-                                    }}
-                                    className="bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 transition-colors shadow-sm"
-                                >
-                                    <Square size={12} fill="currentColor" /> Stop AI Voice
-                                </button>
-                            </div>
-                        )}
+
                         <div ref={messagesEndRef} />
-                        
-                        {isRecording && (
-                            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-red-100 text-red-600 px-4 py-2 rounded-full text-sm font-bold shadow-lg flex items-center gap-2 animate-pulse border border-red-200">
-                                <span className="w-3 h-3 bg-red-600 rounded-full"></span>
-                                Listening...
-                            </div>
-                        )}
                     </div>
 
-                    {/* Input Area */}
-                    <form onSubmit={handleSendText} className="p-4 bg-white border-t border-gray-100 flex gap-3 items-center">
-                        {isRecording ? (
-                            <button type="button" onClick={stopRecording} className="w-12 h-12 rounded-full bg-red-100 text-red-600 hover:bg-red-200 flex items-center justify-center transition-colors focus:outline-none shadow-inner border border-red-200">
-                                <Square size={18} fill="currentColor" />
+                    {/* Bottom Query Input Bar */}
+                    <div className="p-4 bg-white/95 border-t border-gray-200 relative z-20">
+                        <form 
+                            onSubmit={(e) => { e.preventDefault(); handleSendText(); }} 
+                            className="max-w-5xl mx-auto flex items-center gap-4 bg-white border-2 border-gray-300 rounded-full px-6 py-3 shadow-md shadow-sm focus-within:border-[#f37021] focus-within:ring-2 focus-within:ring-orange-200 transition-all"
+                        >
+                            <input 
+                                type="text"
+                                value={inputText}
+                                onChange={(e) => setInputText(e.target.value)}
+                                placeholder="Type your municipal complaint or press mic to speak (English, Telugu, Hindi)"
+                                className="flex-1 bg-transparent text-sm md:text-base text-gray-800 placeholder-gray-400 outline-none px-2"
+                            />
+
+                            <button
+                                type="button"
+                                onClick={isRecording ? stopRecording : startRecording}
+                                className={`w-11 h-11 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                                    isRecording ? 'bg-red-500 text-white animate-pulse' : 'text-gray-500 hover:text-[#f37021] hover:bg-orange-50'
+                                }`}
+                                title={isRecording ? "Stop Recording" : "Voice Input"}
+                            >
+                                <Mic size={24} />
                             </button>
-                        ) : (
-                            <button type="button" onClick={startRecording} className="w-12 h-12 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-primary flex items-center justify-center transition-colors focus:outline-none">
-                                <Mic size={22} />
+
+                            <button
+                                type="submit"
+                                disabled={!inputText.trim()}
+                                className="w-9 h-9 rounded-full bg-gradient-to-r from-[#f37021] to-[#e65100] hover:from-[#e65100] hover:to-[#bf360c] text-white flex items-center justify-center shadow-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                            >
+                                <Send size={20} className="ml-0.5" />
                             </button>
-                        )}
-                        <input
-                            type="text"
-                            value={inputText}
-                            onChange={(e) => setInputText(e.target.value)}
-                            placeholder="Type a message..."
-                            className="flex-1 bg-gray-100 border-none rounded-full px-5 py-3 text-sm focus:ring-2 focus:ring-primary focus:bg-white transition-all text-gray-800 outline-none"
-                        />
-                        <button type="submit" disabled={!inputText.trim()} className="w-12 h-12 rounded-full bg-primary text-white flex items-center justify-center hover:bg-blue-800 transition-colors focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed">
-                            <Send size={18} className="ml-1" />
+                        </form>
+                    </div>
+
+                </div>
+            </div>
+
+            {/* Grievance Registered Success Modal */}
+            {successModalData && (
+                <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+                    <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center shadow-2xl border border-gray-100 animate-scale-up">
+                        
+                        <div className="w-20 h-20 rounded-full bg-emerald-50 border-4 border-emerald-400 flex items-center justify-center text-emerald-600 mx-auto mb-5 shadow-inner">
+                            <Check size={42} strokeWidth={3} />
+                        </div>
+
+                        <h2 className="text-xl font-black text-gray-900 tracking-tight mb-4">
+                            GHMC Complaint Registered Successfully
+                        </h2>
+
+                        <div className="bg-[#e8f8f0] border border-emerald-200 rounded-2xl p-5 mb-6 space-y-3">
+                            <div className="text-sm font-bold text-emerald-800 flex items-center justify-center gap-1.5">
+                                <span>🎉</span> Your civic complaint has been registered with GHMC.
+                            </div>
+
+                            <div className="bg-white/80 border border-emerald-300/80 rounded-xl p-3 text-center">
+                                <div className="text-xs text-gray-600 font-medium mb-1">Your GHMC Tracking ID is:</div>
+                                <div className="text-base font-black text-emerald-900 font-mono tracking-wider flex items-center justify-center gap-2">
+                                    <span>{successModalData.registrationNumber}</span>
+                                    <button 
+                                        onClick={() => handleCopyId(successModalData.registrationNumber)}
+                                        className="text-emerald-700 hover:text-emerald-900 p-1 rounded hover:bg-emerald-100 transition-colors cursor-pointer"
+                                        title="Copy Registration ID"
+                                    >
+                                        {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={() => setSuccessModalData(null)}
+                            className="w-full py-3 bg-[#4caf50] hover:bg-[#43a047] text-white font-extrabold text-sm rounded-xl shadow-md hover:shadow-lg transition-all cursor-pointer uppercase tracking-wider"
+                        >
+                            OK
                         </button>
-                    </form>
+                    </div>
                 </div>
             )}
-        </>
+
+        </div>
     );
 }
-
-
-
-

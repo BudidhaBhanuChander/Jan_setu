@@ -1,10 +1,11 @@
 import React from 'react'
-import { RefreshCw, Plus } from 'lucide-react'
+import { Menu, RefreshCw, Plus, Bell } from 'lucide-react'
 
-export default function Header({ title, subtitle, activePage, setActivePage }) {
+export default function Header({ title, subtitle, activePage, setActivePage, onMenuClick }) {
   return (
     <div className="header">
       <div className="header-left">
+        <button className="menu-toggle" onClick={onMenuClick} aria-label="Open navigation"><Menu size={20} /></button>
         <h1>{title}</h1>
         <p>{subtitle}</p>
       </div>
@@ -24,13 +25,8 @@ export default function Header({ title, subtitle, activePage, setActivePage }) {
             New Complaint
           </button>
         )}
-        <div style={{
-          width: 36, height: 36, borderRadius: '50%',
-          background: 'var(--gradient-primary)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 14, fontWeight: 700, color: 'white',
-          cursor: 'pointer', boxShadow: 'var(--shadow-glow)',
-        }}>
+        <button className="notification-btn" aria-label="Notifications"><Bell size={17} /><span /></button>
+        <div className="profile-avatar" title="GHMC User">
           GH
         </div>
       </div>

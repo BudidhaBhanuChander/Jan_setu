@@ -12,9 +12,9 @@ const NAV_ITEMS = [
   { id: 'agents', label: 'AI Agent Monitor', icon: Bot, section: 'Intelligence' },
 ]
 
-export default function Sidebar({ activePage, setActivePage }) {
+export default function Sidebar({ activePage, setActivePage, isOpen, onClose }) {
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isOpen ? 'sidebar-open' : ''}`}>
       {/* Logo */}
       <div className="sidebar-logo">
         <div className="logo-badge">
@@ -39,7 +39,7 @@ export default function Sidebar({ activePage, setActivePage }) {
                 <button
                   key={id}
                   className={`nav-item ${activePage === id ? 'active' : ''}`}
-                  onClick={() => setActivePage(id)}
+                  onClick={() => { setActivePage(id); onClose?.() }}
                 >
                   <Icon className="nav-icon" size={16} />
                   {label}
