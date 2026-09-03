@@ -215,58 +215,59 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     
     # SQLite automatic schema migration for users and grievances tables
-    with engine.connect() as conn:
-        try:
-            # Users table migration
-            result = conn.exec_driver_sql("PRAGMA table_info(users)")
-            existing_cols = {row[1] for row in result.fetchall()}
-            new_columns = [
-                ("phone", "VARCHAR"),
-                ("email", "VARCHAR"),
-                ("address", "VARCHAR"),
-                ("ward_colony", "VARCHAR"),
-                ("pincode", "VARCHAR"),
-                ("is_active", "BOOLEAN DEFAULT 1"),
-                ("negligence_strikes", "INTEGER DEFAULT 0"),
-                ("created_at", "DATETIME")
-            ]
-            for col_name, col_type in new_columns:
-                if col_name not in existing_cols:
-                    conn.exec_driver_sql(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
-                    print(f"[DB Init] Migrated users table: added {col_name}")
+    if DATABASE_URL.startswith("sqlite"):
+        with engine.connect() as conn:
+            try:
+                # Users table migration
+                result = conn.exec_driver_sql("PRAGMA table_info(users)")
+                existing_cols = {row[1] for row in result.fetchall()}
+                new_columns = [
+                    ("phone", "VARCHAR"),
+                    ("email", "VARCHAR"),
+                    ("address", "VARCHAR"),
+                    ("ward_colony", "VARCHAR"),
+                    ("pincode", "VARCHAR"),
+                    ("is_active", "BOOLEAN DEFAULT 1"),
+                    ("negligence_strikes", "INTEGER DEFAULT 0"),
+                    ("created_at", "DATETIME")
+                ]
+                for col_name, col_type in new_columns:
+                    if col_name not in existing_cols:
+                        conn.exec_driver_sql(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+                        print(f"[DB Init] Migrated users table: added {col_name}")
 
-            # Grievances table migration for dynamic priority, geohash, before/after images & dispute
-            result_g = conn.exec_driver_sql("PRAGMA table_info(grievances)")
-            existing_g_cols = {row[1] for row in result_g.fetchall()}
-            new_g_columns = [
-                ("priority_score", "FLOAT DEFAULT 50.0"),
-                ("priority_reason", "TEXT DEFAULT ''"),
-                ("field_inspection_notes", "TEXT DEFAULT ''"),
-                ("field_inspected_at", "DATETIME"),
-                ("field_inspected_by", "INTEGER"),
-                ("before_image_url", "VARCHAR DEFAULT ''"),
-                ("after_image_url", "VARCHAR DEFAULT ''"),
-                ("geohash", "VARCHAR DEFAULT ''"),
-                ("dispute_reason", "TEXT DEFAULT ''"),
-                ("dispute_image_url", "VARCHAR DEFAULT ''"),
-                ("disputed_at", "DATETIME"),
-                ("is_negligence_verified", "BOOLEAN DEFAULT 0")
-            ]
-            for col_name, col_type in new_g_columns:
-                if col_name not in existing_g_cols:
-                    conn.exec_driver_sql(f"ALTER TABLE grievances ADD COLUMN {col_name} {col_type}")
-                    print(f"[DB Init] Migrated grievances table: added {col_name}")
+                # Grievances table migration for dynamic priority, geohash, before/after images & dispute
+                result_g = conn.exec_driver_sql("PRAGMA table_info(grievances)")
+                existing_g_cols = {row[1] for row in result_g.fetchall()}
+                new_g_columns = [
+                    ("priority_score", "FLOAT DEFAULT 50.0"),
+                    ("priority_reason", "TEXT DEFAULT ''"),
+                    ("field_inspection_notes", "TEXT DEFAULT ''"),
+                    ("field_inspected_at", "DATETIME"),
+                    ("field_inspected_by", "INTEGER"),
+                    ("before_image_url", "VARCHAR DEFAULT ''"),
+                    ("after_image_url", "VARCHAR DEFAULT ''"),
+                    ("geohash", "VARCHAR DEFAULT ''"),
+                    ("dispute_reason", "TEXT DEFAULT ''"),
+                    ("dispute_image_url", "VARCHAR DEFAULT ''"),
+                    ("disputed_at", "DATETIME"),
+                    ("is_negligence_verified", "BOOLEAN DEFAULT 0")
+                ]
+                for col_name, col_type in new_g_columns:
+                    if col_name not in existing_g_cols:
+                        conn.exec_driver_sql(f"ALTER TABLE grievances ADD COLUMN {col_name} {col_type}")
+                        print(f"[DB Init] Migrated grievances table: added {col_name}")
 
-            # Agent logs table migration
-            result_l = conn.exec_driver_sql("PRAGMA table_info(agent_logs)")
-            existing_l_cols = {row[1] for row in result_l.fetchall()}
-            if "timestamp" not in existing_l_cols:
-                conn.exec_driver_sql("ALTER TABLE agent_logs ADD COLUMN timestamp DATETIME")
-                print("[DB Init] Migrated agent_logs table: added timestamp")
+                # Agent logs table migration
+                result_l = conn.exec_driver_sql("PRAGMA table_info(agent_logs)")
+                existing_l_cols = {row[1] for row in result_l.fetchall()}
+                if "timestamp" not in existing_l_cols:
+                    conn.exec_driver_sql("ALTER TABLE agent_logs ADD COLUMN timestamp DATETIME")
+                    print("[DB Init] Migrated agent_logs table: added timestamp")
 
-            conn.commit()
-        except Exception as e:
-            print(f"[DB Init] Migration notice: {e}")
+                conn.commit()
+            except Exception as e:
+                print(f"[DB Init] Migration notice: {e}")
 
     # Auto-seed baseline departments and admin if empty
     db = SessionLocal()
