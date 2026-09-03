@@ -381,7 +381,7 @@ def process_voice_intent(text: str, session_id: str, db, lang: str = None) -> tu
             'Content-Type': 'application/json',
         }
         payload = {
-            'model': settings.LLM_MODEL or 'llama-3.3-70b-versatile',
+            'model': settings.LLM_MODEL if (settings.LLM_MODEL and 'llama' not in settings.LLM_MODEL) else 'qwen/qwen3.8-27b',
             'messages': session['messages'],
             'tools': TOOLS,
             'tool_choice': 'auto',
