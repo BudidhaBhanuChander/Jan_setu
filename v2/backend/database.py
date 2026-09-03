@@ -287,6 +287,10 @@ def init_db():
             db.add_all(default_depts)
             db.commit()
 
+        if db.query(Zone).count() == 0:
+            db.add_all([Zone(id=i, name=f"GHMC Ward {i}", ward_number=i, city="Hyderabad") for i in range(1, 151)])
+            db.commit()
+
         # Ensure demo accounts exist
         pwd = get_password_hash("pass123")
         demo_users = [
