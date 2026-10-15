@@ -376,7 +376,7 @@ export default function CitizenDashboard() {
                 citizen_phone: ghmcForm.mobileNo,
                 citizen_email: user?.email || 'citizen@ghmc.gov.in',
                 citizen_id: user?.id,
-                channel: 'GHMC_WEB_PORTAL'
+                channel: 'EMERGENCY'
             };
 
             const res = await api.post('/grievances/', payload);
