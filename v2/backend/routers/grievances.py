@@ -56,11 +56,13 @@ def _apply_filters(query, status, category, severity, department_id, officer_id,
     return query
 
 
+@router.post("", response_model=GrievanceOut)
 @router.post("/", response_model=GrievanceOut)
 def submit_grievance(payload: GrievanceCreate, db: Session = Depends(get_db)):
     """Submit a new grievance with mandatory photo and geocoded location — triggers AI pipeline."""
     img_url = payload.before_image_url or payload.image_path or ""
-    is_emergency = (payload.channel in ['GHMC_MONSOON_DRF', 'EMERGENCY', 'IVR', 'VOICE']) or (payload.severity == 'CRITICAL')
+    sev = getattr(payload, "severity", None) or ""
+    is_emergency = (payload.channel in ['GHMC_MONSOON_DRF', 'EMERGENCY', 'IVR', 'VOICE']) or (sev.upper() == 'CRITICAL')
     if not img_url:
         if is_emergency:
             img_url = "https://images.unsplash.com/photo-1547683905-f686c993aae5?auto=format&fit=crop&w=400&q=80"
@@ -90,6 +92,7 @@ def submit_grievance(payload: GrievanceCreate, db: Session = Depends(get_db)):
     return grievance
 
 
+@router.get("", response_model=List[GrievanceOut])
 @router.get("/", response_model=List[GrievanceOut])
 def list_grievances(
     response: Response,

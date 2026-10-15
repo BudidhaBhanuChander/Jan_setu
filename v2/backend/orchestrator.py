@@ -2,7 +2,7 @@ import uuid
 import json
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
-from database import Grievance, User, StatusEvent, AgentLog
+from database import Grievance, User, StatusEvent, AgentLog, Zone
 from agents.graph import grievance_graph
 
 def utcnow():
@@ -31,10 +31,20 @@ def process_new_grievance(raw_text: str, language: str, location_text: str,
     
     tracking_id = _make_tracking_id()
     
+    # Safely guard citizen_user_id foreign key constraint
+    if citizen_user_id:
+        if not db.query(User).filter(User.id == citizen_user_id).first():
+            citizen_user_id = None
+
     if not citizen_user_id and citizen_phone:
         citizen = db.query(User).filter(User.username == citizen_phone).first()
         if citizen:
             citizen_user_id = citizen.id
+
+    # Safely guard ward_id foreign key constraint
+    if ward_id:
+        if not db.query(Zone).filter(Zone.id == ward_id).first():
+            ward_id = None
 
     img_url = before_image_url or image_path or ""
             

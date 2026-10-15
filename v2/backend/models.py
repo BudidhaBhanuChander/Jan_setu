@@ -47,6 +47,7 @@ class GrievanceCreate(BaseModel):
     citizen_id: Optional[int] = None
     ward_id: Optional[int] = None
     category: Optional[str] = None
+    severity: Optional[str] = None
 
 
 class StatusEventOut(BaseModel):
