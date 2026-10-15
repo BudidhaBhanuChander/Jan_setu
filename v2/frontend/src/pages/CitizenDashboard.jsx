@@ -357,10 +357,7 @@ export default function CitizenDashboard() {
             alert('Please enter grievance description');
             return;
         }
-        if (!ghmcPhotoPreviews[0]) {
-            alert('Compulsory Photographic Proof required. Please click camera box #1 to capture/attach premise evidence.');
-            return;
-        }
+        const photoToUse = ghmcPhotoPreviews[0] || "https://images.unsplash.com/photo-1547683905-f686c993aae5?auto=format&fit=crop&w=400&q=80";
 
         setSubmittingGhmc(true);
         try {
@@ -370,7 +367,7 @@ export default function CitizenDashboard() {
                 latitude: ghmcForm.latitude,
                 longitude: ghmcForm.longitude,
                 geohash: ghmcForm.geohash,
-                before_image_url: ghmcPhotoPreviews[0],
+                before_image_url: photoToUse,
                 category: ghmcForm.category.includes('Road') ? 'Roads & Infrastructure' : ghmcForm.category.includes('Light') ? 'Electrical' : ghmcForm.category.includes('Sanitation') ? 'Sanitation' : 'Public Health',
                 citizen_name: ghmcForm.userName,
                 citizen_phone: ghmcForm.mobileNo,
