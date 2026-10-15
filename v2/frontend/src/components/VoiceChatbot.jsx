@@ -55,7 +55,7 @@ export default function VoiceChatbot({ embedded = false, onGrievanceRegistered }
     // WebSocket connection
     useEffect(() => {
         if (!isOpen) return;
-        const wsBase = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/voice/ws';
+        const wsBase = import.meta.env.VITE_WS_URL || 'wss://jan-setu-backend-1z3d.onrender.com/voice/ws';
         const socket = new WebSocket(wsBase);
         socket.binaryType = 'blob';
         

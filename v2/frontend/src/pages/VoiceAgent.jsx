@@ -227,8 +227,12 @@ export default function VoiceAgent({ showToast }) {
   // ── Resolve the WebSocket URL from the current page origin so it works
   //    behind the Vite dev proxy and in production without code changes.
   const getWsUrl = () => {
+    if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL
+    if (window.location.hostname.includes('vercel.app')) {
+      return 'wss://jan-setu-backend-1z3d.onrender.com/voice/ws'
+    }
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${proto}//${window.location.host}/api/voice/ws`
+    return `${proto}//${window.location.host}/voice/ws`
   }
 
   // ── Connect WebSocket
