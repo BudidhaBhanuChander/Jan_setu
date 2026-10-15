@@ -20,8 +20,8 @@ groq>=0.30.0
 requests>=2.32.0
 
 # V2 Enterprise Auth & DB
-passlib[bcrypt]
+bcrypt>=4.0.0
+passlib>=1.7.4
 python-jose[cryptography]
 chromadb
 psycopg2-binary>=2.9.9
-

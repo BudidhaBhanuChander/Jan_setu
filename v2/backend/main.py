@@ -89,6 +89,7 @@ def root():
 def health():
     return {
         "status": "ok",
+        "python": sys.version,
         "llm_enabled": settings.llm_enabled,
         "voice_enabled": settings.voice_enabled,
     }
