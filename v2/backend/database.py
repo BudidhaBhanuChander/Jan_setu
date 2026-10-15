@@ -12,6 +12,9 @@ from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from config import settings
 
 DATABASE_URL = settings.DATABASE_URL
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
+
 # check_same_thread is a SQLite-only argument; guard it so other backends work too.
 _connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, connect_args=_connect_args)
